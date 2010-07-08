@@ -4,9 +4,12 @@
  * 
  * 
  * @author Allen Han <hanzhimeng[at]gmail[dot]com>
- * @version 0.1 - July 3, 2010
+ * @version 0.2B - July 3, 2010
  * 
  */
+
+require_once(WPSC_FILE_PATH.'/wpsc-includes/xmlparser.php');
+ 
 $nzshpcrt_gateways[$num]['name'] = 'HSBC ePayments';
 $nzshpcrt_gateways[$num]['internalname'] = 'hsbc';
 $nzshpcrt_gateways[$num]['function'] = 'gateway_hsbc';
@@ -64,6 +67,8 @@ function gateway_hsbc($seperator, $sessionid) {
 	$purchase_log_sql = "SELECT * FROM `".WPSC_TABLE_PURCHASE_LOGS."` WHERE `sessionid`= ".$sessionid." LIMIT 1";
 	$purchase_log = $wpdb->get_row($purchase_log_sql,ARRAY_A) ;
 	
+	$total_price = $purchase_log['totalprice']*100;
+	
 	$card_no = $_POST['card_number'];
 	$cvv = $_POST['card_code'];
 	$expiry = $_POST['expiry']['month']."/".substr($_POST['expiry']['year'],2);
@@ -94,10 +99,10 @@ function gateway_hsbc($seperator, $sessionid) {
 							</PaymentMech>
 						</Consumer>
 						<Transaction>
-							<Type DataType='String'>PreAuth</Type>
+							<Type DataType='String'>Auth</Type>
 							<CurrentTotals>
 								<Totals>
-									<Total DataType='Money' Currency='".get_option('hsbc_currency')."'>".$perchase_log['totalprice']."</Total>
+									<Total DataType='Money' Currency='".get_option('hsbc_currency')."'>".$total_price."</Total>
 								</Totals>
 							</CurrentTotals>
 						</Transaction>
@@ -105,16 +110,30 @@ function gateway_hsbc($seperator, $sessionid) {
 				</EngineDoc>
 			</EngineDocList>";
 	$ch = curl_init();
-	$url = 'https://www.secure-epayments.apixml.hsbc.com';
+	$url = 'https://www.uat.apixml.netq.hsbc.com/';
 	curl_setopt($ch, CURLOPT_URL, $url);
 	curl_setopt($ch, CURLOPT_HEADER, 0);
+	curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+	curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, 0); 
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 	curl_setopt($ch, CURLOPT_POST, 1);
 	curl_setopt($ch, CURLOPT_POSTFIELDS, $xml);
 	$data = curl_exec($ch);
 	curl_close ($ch);
 	
-	exit("----><pre>".print_r($data,1)."</pre>");
+	$xml2Array = new xml2Array();
+	$parsed = $xml2Array->Parse($data);
+	
+	$response_code = $parsed[0]['children'][1]['children'][4]['children'][6]['children'][1]['children'][2]['tagData'];
+	$response_code = 0;
+	$transact_url = get_option('transact_url');
+	if ($response_code == 1) { //Approved
+		$wpdb->query("UPDATE `".WPSC_TABLE_PURCHASE_LOGS."` SET `processed` = '2' WHERE `sessionid` = ".$sessionid." LIMIT 1");
+	} //Something bad happened.
+	
+	header("Location: ".$transact_url.$seperator."sessionid=".$sessionid);
+
+	exit;
 }
 
 function form_hsbc() {
